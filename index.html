@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SAT Reading & Writing II — Practice</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="eyebrow">SAT READING & WRITING</div>
+    <h1>Hardest Reading Questions</h1>
+  </div>
+  <div class="progress-wrap">
+    <span id="progressText">Question 1 of 500</span>
+    <div class="progress"><div id="progressBar"></div></div>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <div class="side-title">Questions</div>
+    <div id="questionGrid" class="question-grid"></div>
+  </aside>
+
+  <section class="card">
+    <div class="meta">
+      <span id="qLabel">Question 1</span>
+      <span id="status"></span>
+    </div>
+
+    <article id="passage" class="passage"></article>
+
+    <h2 id="question" class="question"></h2>
+
+    <div id="choices" class="choices"></div>
+
+    <div id="feedback" class="feedback hidden"></div>
+
+    <div class="actions">
+      <button id="submitBtn" class="primary">Submit</button>
+      <button id="tryAgainBtn" class="secondary hidden">Try Again</button>
+      <button id="showAnswerBtn" class="secondary hidden">Show Correct Answer</button>
+      <button id="explainBtn" class="secondary hidden">View Explanation</button>
+    </div>
+
+    <div id="explanation" class="explanation hidden"></div>
+
+    <div class="nav">
+      <button id="prevBtn" class="secondary">← Previous</button>
+      <button id="nextBtn" class="primary">Next →</button>
+    </div>
+  </section>
+</main>
+
+<script>
+let questions = [];
+let current = 1;
+const state = new Map();
+
+async function load() {
+  const r = await fetch("/api/questions");
+  questions = await r.json();
+  renderGrid();
+  render();
+}
+
+function renderGrid() {
+  const grid = document.getElementById("questionGrid");
+  grid.innerHTML = "";
+  for (const q of questions) {
+    const b = document.createElement("button");
+    b.textContent = q.id;
+    b.className = "grid-btn";
+    b.dataset.id = q.id;
+    b.onclick = () => { current = q.id; render(); };
+    grid.appendChild(b);
+  }
+}
+
+async function render() {
+  const q = questions[current - 1];
+  document.getElementById("progressText").textContent = `Question ${current} of ${questions.length}`;
+  document.getElementById("progressBar").style.width = `${current/questions.length*100}%`;
+  document.getElementById("qLabel").textContent = `Question ${current}`;
+
+  const passage = document.getElementById("passage");
+  passage.textContent = q.passage || "";
+  document.getElementById("question").textContent = q.question;
+
+  const choices = document.getElementById("choices");
+  choices.innerHTML = "";
+  for (const letter of ["A","B","C","D"]) {
+    const label = document.createElement("label");
+    label.className = "choice";
+    label.innerHTML = `<input type="radio" name="choice" value="${letter}"><span class="letter">${letter}</span><span>${escapeHtml(q.choices?.[letter] || "")}</span>`;
+    choices.appendChild(label);
+  }
+
+  const s = state.get(current) || {};
+  resetPanels();
+  if (s.submitted) {
+    showSubmitted(s);
+  }
+
+  document.querySelectorAll(".grid-btn").forEach(b => {
+    b.classList.toggle("current", Number(b.dataset.id) === current);
+    b.classList.toggle("done", !!state.get(Number(b.dataset.id))?.submitted);
+  });
+  document.getElementById("prevBtn").disabled = current === 1;
+  document.getElementById("nextBtn").disabled = current === questions.length;
+}
+
+function resetPanels() {
+  for (const id of ["feedback","explanation","tryAgainBtn","showAnswerBtn","explainBtn"]) {
+    document.getElementById(id).classList.add("hidden");
+  }
+  document.getElementById("submitBtn").classList.remove("hidden");
+  document.getElementById("status").textContent = "";
+  document.getElementById("feedback").textContent = "";
+  document.getElementById("explanation").textContent = "";
+}
+
+function selected() {
+  return document.querySelector('input[name="choice"]:checked')?.value || null;
+}
+
+async function submit() {
+  const choice = selected();
+  if (!choice) return;
+  const r = await fetch(`/api/questions/${current}`);
+  const q = await r.json();
+  const s = state.get(current) || {};
+  s.selected = choice;
+  s.submitted = true;
+  s.correct = choice === q.answer;
+  s.answerRevealed = false;
+  s.explanationShown = false;
+  state.set(current, s);
+  showSubmitted(s, q);
+  renderGrid();
+}
+
+async function showSubmitted(s, alreadyLoaded=null) {
+  const q = alreadyLoaded || await (await fetch(`/api/questions/${current}`)).json();
+  document.querySelector(`input[value="${s.selected}"]`).checked = true;
+  document.getElementById("submitBtn").classList.add("hidden");
+  document.getElementById("tryAgainBtn").classList.remove("hidden");
+  document.getElementById("showAnswerBtn").classList.remove("hidden");
+  document.getElementById("explainBtn").classList.remove("hidden");
+
+  const feedback = document.getElementById("feedback");
+  feedback.classList.remove("hidden");
+  feedback.classList.toggle("correct", s.correct);
+  feedback.classList.toggle("incorrect", !s.correct);
+  feedback.textContent = s.correct ? "Correct!" : "Incorrect — your answer was " + s.selected + ".";
+
+  document.getElementById("status").textContent = s.correct ? "Answered" : "Needs review";
+  if (s.answerRevealed) revealAnswer(q);
+  if (s.explanationShown) revealExplanation(q);
+}
+
+function revealAnswer(q) {
+  const f = document.getElementById("feedback");
+  f.textContent += ` Correct answer: ${q.answer}`;
+  const s = state.get(current); s.answerRevealed = true; state.set(current,s);
+}
+
+function revealExplanation(q) {
+  const e = document.getElementById("explanation");
+  e.classList.remove("hidden");
+  e.textContent = q.explanation;
+  const s = state.get(current); s.explanationShown = true; state.set(current,s);
+}
+
+document.getElementById("submitBtn").onclick = submit;
+document.getElementById("tryAgainBtn").onclick = () => {
+  const s = state.get(current);
+  if (s) { s.submitted = false; s.answerRevealed = false; s.explanationShown = false; state.set(current,s); }
+  resetPanels();
+  document.querySelectorAll('input[name="choice"]').forEach(x => x.checked=false);
+};
+document.getElementById("showAnswerBtn").onclick = async () => {
+  const q = await (await fetch(`/api/questions/${current}`)).json();
+  revealAnswer(q);
+};
+document.getElementById("explainBtn").onclick = async () => {
+  const q = await (await fetch(`/api/questions/${current}`)).json();
+  revealExplanation(q);
+};
+document.getElementById("prevBtn").onclick = () => { if(current>1){current--;render();} };
+document.getElementById("nextBtn").onclick = () => { if(current<questions.length){current++;render();} };
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+}
+load();
+</script>
+</body>
+</html>
